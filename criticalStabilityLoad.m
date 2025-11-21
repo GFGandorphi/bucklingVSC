@@ -1,4 +1,4 @@
-function [eigVal, eigVals, eigVecs, C, stressCell] = criticalStabilityLoad(inputMaterial, inputGeometry, inputLoads, inputMN, inputNumIntegral, forcedInputs)
+function [eigVal, eigVals, eigVecs, wb, outputCell] = criticalStabilityLoad(inputMaterial, inputGeometry, inputLoads, inputMN, inputNumIntegral, forcedInputs)
 % -------------------------------------------------------------------------
 % criticalStabilityLoad evaluates the linear critical buckling load
 % -------------------------------------------------------------------------
@@ -41,17 +41,33 @@ function [eigVal, eigVals, eigVecs, C, stressCell] = criticalStabilityLoad(input
 %      eigVal ------------ []    minimum eigenvalue (Critical Load/Applied Load)
 %      eigVals ----------- []    all eigenvalues
 %      eigVecs ----------- []    all eigenvectors
-%      C ----------------- []    displacements constants vector
-%      stressCell -------- {Nxx,Nyy,Nxy,Mxx,Myy,Mxy,ABDs,angles}
+%      wb ---------------- []    w buckled shape from eigvector (nIntPx x nIntPy array)
+%      outputCell -------- {ABDs,angles,C,outputGauss}
 %      Where:
-%           Nxx ---------- [N/m] x  membrane flux (nIntPx x nIntPy array)
-%           Nyy ---------- [N/m] y  membrane flux (nIntPx x nIntPy array)
-%           Nxy ---------- [N/m] xy membrane flux (nIntPx x nIntPy array)
-%           Mxx ---------- [N]   x  moment flux (nIntPx x nIntPy array)
-%           Myy ---------- [N]   y  moment flux (nIntPx x nIntPy array)
-%           Mxy ---------- [N]   xy moment flux (nIntPx x nIntPy array)
 %           ABDs --------- [+]   ABDs (nIntPx x nIntPy cell with 6x6 each)
 %           angles ------- [°]   stack angles (nIntPx x nIntPy cell with nPliesx1 each)
+%           C ------------ []    displacements constants vector
+%           outputGauss -- {Nxx, Nyy, Nxy, Mxx, Myy, Mxy, ...
+%                           exx, eyy, exy, kxx, kyy, kxy, ...
+%                           um, vm, wm};
+%           Nxx ---------- [N/m] x  membrane flux
+%           Nyy ---------- [N/m] y  membrane flux
+%           Nxy ---------- [N/m] xy membrane flux
+%           Mxx ---------- [N]   x  moment flux
+%           Myy ---------- [N]   y  moment flux
+%           Mxy ---------- [N]   xy moment flux
+%           exx ---------- [N/m] x  membrane strain
+%           eyy ---------- [N/m] y  membrane strain
+%           exy ---------- [N/m] xy membrane strain
+%           kxx ---------- [N]   x  bending strain
+%           kyy ---------- [N]   y  bending strain
+%           kxy ---------- [N]   xy bending strain
+%           um ----------- [m]   x prebuckling displacement
+%           vm ----------- [m]   y prebuckling displacement
+%           wm ----------- [m]   w prebuckling displacement
+%           Note: The domain respect Gauss distribution
+%           Note: All flux and displacement values are from prebuckling
+%           Note: All outputGauss elements are a (nIntPx x nIntPy) array
 
 %% 00 - INPUTS ASSIGNMENT %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -159,36 +175,28 @@ function [eigVal, eigVals, eigVecs, C, stressCell] = criticalStabilityLoad(input
     
 
 %% 03 - DISPLACEMENTS DOMAINS %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-    
+
     %%%% Initialization
-    xi = 2*xGauss/a-1;
-    eta = 2*yGauss/b-1;
+    zV = zeros(1,n*m);
     etaRef = 2*yRef/b-1;
-    
-    fXi = fun_dispBardell("f",xi);
-    fEta = fun_dispBardell("f",eta);
+
     f1pos = fun_dispBardell("f",1);
     f1neg = fun_dispBardell("f",-1);
-    fref = fun_dispBardell("f",etaRef);
-    
-    dfXi = fun_dispBardell("df",xi);
-    dfEta = fun_dispBardell("df",eta);
-    dfref = fun_dispBardell("df",etaRef);
-    
-    d2fXi = fun_dispBardell("d2f",xi);
-    d2fEta = fun_dispBardell("d2f",eta);
-    d2fref = fun_dispBardell("d2f",etaRef);
 
+    fref = fun_dispBardell("f",etaRef);
+    dfref = fun_dispBardell("df",etaRef);
+    d2fref = fun_dispBardell("d2f",etaRef);
+    
     oFSm = [101 5:1:25];
     oSSm = [101 102 5:1:25];
     oSSb = [2 4 5:1:25];
-
+    
     oFSm_x = oFSm(1:m);
     oSSm_x = oSSm(1:m);
     oSSm_y = oSSm(1:n);
     oSSb_x = oSSb(1:m);
     oSSb_y = oSSb(1:n);
-
+    
     cX0 = 1;
     cX1 = 2/a;
     cX2 = 4/a^2;
@@ -196,38 +204,94 @@ function [eigVal, eigVals, eigVecs, C, stressCell] = criticalStabilityLoad(input
     cY1 = 2/b;
     cY2 = 4/b^2;
 
-    %%%% Plate Displacements Fields
-    Npu_x  = fun_getCellArray(  dfXi(:,oFSm_x)*cX1,   fEta(:,oSSm_y)*cY0 );
-    Npu_y  = fun_getCellArray(   fXi(:,oFSm_x)*cX0,  dfEta(:,oSSm_y)*cY1 );
-    Npv_x  = fun_getCellArray(  dfXi(:,oSSm_x)*cX1,   fEta(:,oSSm_y)*cY0 );
-    Npv_y  = fun_getCellArray(   fXi(:,oSSm_x)*cX0,  dfEta(:,oSSm_y)*cY1 );
-    Npw    = fun_getCellArray(   fXi(:,oSSb_x)*cX0,   fEta(:,oSSb_y)*cY0 );
-    Npw_x  = fun_getCellArray(  dfXi(:,oSSb_x)*cX1,   fEta(:,oSSb_y)*cY0 );
-    Npw_y  = fun_getCellArray(   fXi(:,oSSb_x)*cX0,  dfEta(:,oSSb_y)*cY1 );
-    Npw_xx = fun_getCellArray( d2fXi(:,oSSb_x)*cX2,   fEta(:,oSSb_y)*cY0 );
-    Npw_yy = fun_getCellArray(   fXi(:,oSSb_x)*cX0, d2fEta(:,oSSb_y)*cY2 );
-    Npw_xy = fun_getCellArray(  dfXi(:,oSSb_x)*cX1,  dfEta(:,oSSb_y)*cY1 );
+    NuvwCell = cell(1,2);
+    NuvwwCell = cell(1,2);
 
-    %%%% Stringer Displacements Fields
-    Nru_x   = fun_getCellArray(  dfXi(:,oFSm_x)*cX1,  fref(:,oSSm_y)*cY0 );
-    Nru_xx  = fun_getCellArray( d2fXi(:,oFSm_x)*cX2,  fref(:,oSSm_y)*cY0 );
-    Nrw_x   = fun_getCellArray(  dfXi(:,oSSb_x)*cX1,  fref(:,oSSb_y)*cY0 );
-    Nrw_xx  = fun_getCellArray( d2fXi(:,oSSb_x)*cX2,  fref(:,oSSb_y)*cY0 );
-    Nrw_xy  = fun_getCellArray(  dfXi(:,oSSb_x)*cX1, dfref(:,oSSb_y)*cY1 );
-    Nrw_xyx = fun_getCellArray( d2fXi(:,oSSb_x)*cX2, dfref(:,oSSb_y)*cY1 );
-    % for KG
-    Nru_y   = fun_getCellArray(  fXi(:,oFSm_x)*cX0,  dfref(:,oSSm_y)*cY1 );
-    Nrv_x   = fun_getCellArray( dfXi(:,oSSm_x)*cX1,   fref(:,oSSm_y)*cY0 );
-    Nrv_y   = fun_getCellArray(  fXi(:,oSSm_x)*cX0,  dfref(:,oSSm_y)*cY1 );
-    Nrw     = fun_getCellArray(  fXi(:,oSSb_x)*cX0,   fref(:,oSSb_y)*cY0 );
-    Nrw_yy  = fun_getCellArray(  fXi(:,oSSb_x)*cX0, d2fref(:,oSSb_y)*cY2 );
+    % % In the case of different distributions
+    % xUniform = a:-a/(nIntPx-1):0;
+    % yUniform = b:-b/(nIntPy-1):0;
+    % xAux = {xGauss, xUniform'};
+    % yAux = {yGauss, yUniform'};
+    xAux = {xGauss};
+    yAux = {yGauss};
+
+    %%% Domains Evaluation (Uniform and Gauss)
+    for iDomain=1:length(xAux)
+        xi = 2*xAux{iDomain}/a-1;
+        eta = 2*yAux{iDomain}/b-1;
+        
+        fXi = fun_dispBardell("f",xi);
+        fEta = fun_dispBardell("f",eta);
+        
+        dfXi = fun_dispBardell("df",xi);
+        dfEta = fun_dispBardell("df",eta);
+        
+        d2fXi = fun_dispBardell("d2f",xi);
+        d2fEta = fun_dispBardell("d2f",eta);
     
-    %%%% Edges Displacements Fields
-    Npu_x0 = fun_getCellArray( f1neg(:,oFSm_x),  fEta(:,oSSm_y) );
-    Npv_x0 = fun_getCellArray( f1neg(:,oSSm_x),  fEta(:,oSSm_y) );
-    Npv_xa = fun_getCellArray( f1pos(:,oSSm_x),  fEta(:,oSSm_y) );
-    Npu_y0 = fun_getCellArray(   fXi(:,oFSm_x), f1neg(:,oSSm_y) );
-    Npu_yb = fun_getCellArray(   fXi(:,oFSm_x), f1pos(:,oSSm_y) );
+        %%%% Plate Displacements Fields
+        Npu    = fun_getCellArray(   fXi(:,oFSm_x)*cX0,   fEta(:,oSSm_y)*cY0 );
+        Npu_x  = fun_getCellArray(  dfXi(:,oFSm_x)*cX1,   fEta(:,oSSm_y)*cY0 );
+        Npu_y  = fun_getCellArray(   fXi(:,oFSm_x)*cX0,  dfEta(:,oSSm_y)*cY1 );
+        Npv    = fun_getCellArray(   fXi(:,oSSm_x)*cX0,   fEta(:,oSSm_y)*cY0 );
+        Npv_x  = fun_getCellArray(  dfXi(:,oSSm_x)*cX1,   fEta(:,oSSm_y)*cY0 );
+        Npv_y  = fun_getCellArray(   fXi(:,oSSm_x)*cX0,  dfEta(:,oSSm_y)*cY1 );
+        Npw    = fun_getCellArray(   fXi(:,oSSb_x)*cX0,   fEta(:,oSSb_y)*cY0 );
+        Npw_x  = fun_getCellArray(  dfXi(:,oSSb_x)*cX1,   fEta(:,oSSb_y)*cY0 );
+        Npw_y  = fun_getCellArray(   fXi(:,oSSb_x)*cX0,  dfEta(:,oSSb_y)*cY1 );
+        Npw_xx = fun_getCellArray( d2fXi(:,oSSb_x)*cX2,   fEta(:,oSSb_y)*cY0 );
+        Npw_yy = fun_getCellArray(   fXi(:,oSSb_x)*cX0, d2fEta(:,oSSb_y)*cY2 );
+        Npw_xy = fun_getCellArray(  dfXi(:,oSSb_x)*cX1,  dfEta(:,oSSb_y)*cY1 );
+    
+        %%%% Stringer Displacements Fields
+        Nru_x   = fun_getCellArray(  dfXi(:,oFSm_x)*cX1,  fref(:,oSSm_y)*cY0 );
+        Nru_xx  = fun_getCellArray( d2fXi(:,oFSm_x)*cX2,  fref(:,oSSm_y)*cY0 );
+        Nrw_x   = fun_getCellArray(  dfXi(:,oSSb_x)*cX1,  fref(:,oSSb_y)*cY0 );
+        Nrw_xx  = fun_getCellArray( d2fXi(:,oSSb_x)*cX2,  fref(:,oSSb_y)*cY0 );
+        Nrw_xy  = fun_getCellArray(  dfXi(:,oSSb_x)*cX1, dfref(:,oSSb_y)*cY1 );
+        Nrw_xyx = fun_getCellArray( d2fXi(:,oSSb_x)*cX2, dfref(:,oSSb_y)*cY1 );
+        % for KG
+        Nru_y   = fun_getCellArray(  fXi(:,oFSm_x)*cX0,  dfref(:,oSSm_y)*cY1 );
+        Nrv_x   = fun_getCellArray( dfXi(:,oSSm_x)*cX1,   fref(:,oSSm_y)*cY0 );
+        Nrv_y   = fun_getCellArray(  fXi(:,oSSm_x)*cX0,  dfref(:,oSSm_y)*cY1 );
+        Nrw     = fun_getCellArray(  fXi(:,oSSb_x)*cX0,   fref(:,oSSb_y)*cY0 );
+        Nrw_yy  = fun_getCellArray(  fXi(:,oSSb_x)*cX0, d2fref(:,oSSb_y)*cY2 );
+        
+        %%%% Edges Displacements Fields
+        Npu_x0 = fun_getCellArray( f1neg(:,oFSm_x),  fEta(:,oSSm_y) );
+        Npv_x0 = fun_getCellArray( f1neg(:,oSSm_x),  fEta(:,oSSm_y) );
+        Npv_xa = fun_getCellArray( f1pos(:,oSSm_x),  fEta(:,oSSm_y) );
+        Npu_y0 = fun_getCellArray(   fXi(:,oFSm_x), f1neg(:,oSSm_y) );
+        Npu_yb = fun_getCellArray(   fXi(:,oFSm_x), f1pos(:,oSSm_y) );
+    
+        %%% Store values for plotting and for evaluation
+        NuvwCell{iDomain} = cellfun(@(c1,c2,c3) ...
+                            [c1 zV zV; ...
+                             zV c2 zV; ...
+                             zV zV c3], ...
+                             Npu, Npv, Npw, 'UniformOutput', false);
+
+        NuvwwCell{iDomain} = cellfun(@(c1,c2,c3,c4,c5,c6,c7,c8) ...
+                             [c1            zV               zV; ...
+                              zV            c2         (1/r)*c3; ...
+                              c4            c5               zV; ...
+                              zV            zV              -c6; ...
+                              zV            c2*(1/r)        -c7; ...
+                              c4*(-0.5/r)   c5*(1.5/r)    -2*c8], ...
+                              Npu_x, Npv_y, Npw, Npu_y, Npv_x, Npw_xx, ...
+                              Npw_yy, Npw_xy, 'UniformOutput', false);
+    end
+    Nuvww = NuvwwCell{1};
+
+    %%%% For Stringer 
+    Btio = cellfun(@(c1,c2,c3,c4,c5) ...
+                     [c1 zV zV; ...
+                      zV c2 zV; ...
+                      zV zV c3; ...
+                      zV zV c4; ...
+                      zV zV c5], ...
+                      Nru_x, Nru_xx, Nrw_xx, Nrw_xy, Nrw_xyx, ... 
+                      'UniformOutput', false);
 
     
 %% 04 - INTEGRATIONS %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -240,23 +304,12 @@ function [eigVal, eigVals, eigVecs, C, stressCell] = criticalStabilityLoad(input
     intLimitsY = (b - 0) * 0.5;
     WW = wx*wy;
     WWc = num2cell(WW);
-    zV = zeros(1,n*m);
     igV = repmat(1:nIntPx,1,nIntPy);
     jgV = zeros(1,nIntPx*nIntPy);
     jgV(1:nIntPx:end) = 1;
     jgV = cumsum(jgV,2);
 
     %%%% Plate Stiffness
-    Nuvww = cellfun(@(c1,c2,c3,c4,c5,c6,c7,c8) ...
-                      [c1            zV               zV; ...
-                       zV            c2         (1/r)*c3; ...
-                       c4            c5               zV; ...
-                       zV            zV              -c6; ...
-                       zV            c2*(1/r)        -c7; ...
-                       c4*(-0.5/r)   c5*(1.5/r)    -2*c8], ...
-                       Npu_x, Npv_y, Npw, Npu_y, Npv_x, Npw_xx, ...
-                       Npw_yy, Npw_xy, 'UniformOutput', false);
-    
     dK = zeros(3*n*m,3*n*m);
     for I = 1:nIntPy*nIntPx
         ig = igV(I);
@@ -266,14 +319,6 @@ function [eigVal, eigVals, eigVecs, C, stressCell] = criticalStabilityLoad(input
     K = intLimitsXY * dK;
 
     %%%% Stringer Stiffness
-    Btio = cellfun(@(c1,c2,c3,c4,c5) ...
-                     [c1 zV zV; ...
-                      zV c2 zV; ...
-                      zV zV c3; ...
-                      zV zV c4; ...
-                      zV zV c5], ...
-                      Nru_x, Nru_xx, Nrw_xx, Nrw_xy, Nrw_xyx, ... 
-                      'UniformOutput', false);
     dKref = zeros(3*n*m,3*n*m);
     for ig = 1:nIntPx
         dKref = dKref + wx(ig)*Btio{ig}'*Cref*Btio{ig};
@@ -326,17 +371,12 @@ function [eigVal, eigVals, eigVecs, C, stressCell] = criticalStabilityLoad(input
     %%%% Displacements Constants Evaluation
     C = Ktotal\F;
 
-    %%%% Build Stress Fields
-    stresses = cellfun(@(c1,c2) c2*c1*C, Nuvww, ABDs, 'UniformOutput', 0);
-    stressesA = cell2mat(stresses);
-
-    Nxx = stressesA(1:6:end,:);
-    Nyy = stressesA(2:6:end,:);
-    Nxy = stressesA(3:6:end,:);
-    Mxx = stressesA(4:6:end,:);
-    Myy = stressesA(5:6:end,:);
-    Mxy = stressesA(6:6:end,:);
-    stressCell = {Nxx, Nyy, Nxy, Mxx, Myy, Mxy, ABDs, angles};
+    %%%% Prebuckling Flux Fields
+    fluxes = cellfun(@(c1,c2) c2*c1*C, Nuvww, ABDs, 'UniformOutput', 0);
+    fluxesA = real(cell2mat(fluxes));
+    Nxx = fluxesA(1:6:end,:);
+    Nyy = fluxesA(2:6:end,:);
+    Nxy = fluxesA(3:6:end,:);
 
     %%%% Plate Geometry Stiffness
     % KGxP
@@ -372,7 +412,6 @@ function [eigVal, eigVals, eigVecs, C, stressCell] = criticalStabilityLoad(input
     end
     KGxyP = intLimitsXY * dKGxy;
 	
-
     %%%% Stringer Geometry Stiffness
     % KGxR
     defsRc = cellfun(@(c1,c2,c3,c4,c5,c6,c7,c8) ...
@@ -402,10 +441,60 @@ function [eigVal, eigVals, eigVecs, C, stressCell] = criticalStabilityLoad(input
 
     KG = KGx + KGy + 2*KGxy;% + Ksanders;
 
-%% 05 - CRITICAL LOAD EVALUATION %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% 05 - PREBUCKLING OUTPUTS %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+    outputAux = cell(1,2);
+
+    for iDomain=1:length(xAux)
+
+        NuvwwOutput = NuvwwCell{iDomain};
+
+        % Flux Fields
+        fluxes = cellfun(@(c1,c2) c2*c1*C, NuvwwOutput, ABDs, 'UniformOutput', 0);
+        fluxesA = real(cell2mat(fluxes));
+        Nxx = fluxesA(1:6:end,:);
+        Nyy = fluxesA(2:6:end,:);
+        Nxy = fluxesA(3:6:end,:);
+        Mxx = fluxesA(4:6:end,:);
+        Myy = fluxesA(5:6:end,:);
+        Mxy = fluxesA(6:6:end,:);
+    
+        % Strain Fields
+        strains = cellfun(@(c1) c1*C, NuvwwOutput, 'UniformOutput', 0);
+        strainsA = real(cell2mat(strains));
+        exx = strainsA(1:6:end,:);
+        eyy = strainsA(2:6:end,:);
+        exy = strainsA(3:6:end,:);
+        kxx = strainsA(4:6:end,:);
+        kyy = strainsA(5:6:end,:);
+        kxy = strainsA(6:6:end,:);
+
+        % Displacement Fields
+        NuvwOutput = NuvwCell{iDomain};
+        displacements = cellfun(@(c1) c1*C, NuvwOutput, 'UniformOutput', 0);
+        displacementsA = real(cell2mat(displacements));
+        um = displacementsA(1:3:end,:);
+        vm = displacementsA(2:3:end,:);
+        wm = displacementsA(3:3:end,:);
+
+        % Ouput Cell
+        outputAux{iDomain} = {Nxx, Nyy, Nxy, Mxx, Myy, Mxy, ...
+                              exx, eyy, exy, kxx, kyy, kxy, ...
+                              um, vm, wm};
+    end
+    % % In the case of different distributions
+    % outputUniform = outputAux{2};
+    % outputGauss = outputAux{1};
+    outputCell = {ABDs,angles,C,outputAux{1}};
+
+%% 06 - CRITICAL LOAD EVALUATION %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
     [eigVecs, eigAux] = eig(Ktotal,KG);
     eigVals = diag(eigAux);
     [eigVal, ~] = min(eigVals(eigVals>=0));
+
+    eigVec = eigVecs(:,eigVals==eigVal);
+    cAux = eigVec(m*n*2+1:m*n*3);
+    wb = real(cell2mat(cellfun(@(c1) c1*cAux, Npw, 'UniformOutput', 0)));
 
 end
